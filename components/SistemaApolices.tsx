@@ -161,15 +161,23 @@ function isEligibleAltaRenda(tipoCliente: string, premio: string | number) {
   return tipoCliente === "PF" && toNumber(premio) > 10000;
 }
 
+function getDefaultCarteira(tipoCliente: string, premio: string | number): Carteira {
+  if (isEligibleAltaRenda(tipoCliente, premio)) return "Alta Renda";
+  if (tipoCliente === "PJ") return "Empresarial";
+  if (tipoCliente === "PF") return "Renovacao";
+  return "";
+}
+
 function sanitizeCarteira(
   tipoCliente: string,
   premio: string | number,
   carteira: string
 ): Carteira {
+  if (!carteira) return getDefaultCarteira(tipoCliente, premio);
   if (carteira === "Alta Renda" && !isEligibleAltaRenda(tipoCliente, premio)) {
-    return tipoCliente === "PJ" ? "Empresarial" : "Renovacao";
+    return getDefaultCarteira(tipoCliente, premio);
   }
-  return (carteira as Carteira) || "";
+  return (carteira as Carteira) || getDefaultCarteira(tipoCliente, premio);
 }
 
 function splitCsvLine(line: string, separator: string) {
@@ -297,14 +305,14 @@ function polarToCartesian(cx: number, cy: number, radius: number, angleInDegrees
 }
 
 const PIE_COLORS = [
-  "#ffffff",
-  "#bfc6ce",
-  "#8b949e",
-  "#d4d4d8",
-  "#71717a",
-  "#a1a1aa",
-  "#e4e4e7",
-  "#52525b",
+  "#60a5fa",
+  "#34d399",
+  "#fbbf24",
+  "#f472b6",
+  "#a78bfa",
+  "#fb7185",
+  "#22d3ee",
+  "#f97316",
 ];
 
 export default function SistemaApolices() {
@@ -421,7 +429,7 @@ export default function SistemaApolices() {
         carteira: sanitizeCarteira(
           pendingExpired.tipo_cliente || "PF",
           pendingExpired.premio ?? 0,
-          pendingExpired.carteira || "Renovacao"
+          pendingExpired.carteira || ""
         ) as "Alta Renda" | "Empresarial" | "Renovacao",
       });
     }
@@ -625,10 +633,6 @@ export default function SistemaApolices() {
         throw new Error("Selecione a carteira.");
       }
 
-      if (adjustedCarteira === "Alta Renda" && !isEligibleAltaRenda(form.tipo_cliente, form.premio)) {
-        throw new Error("Alta Renda só pode ser usada para PF com prêmio acima de 10 mil.");
-      }
-
       let pdfUrl: string | null = null;
       if (manualPdfFile) {
         pdfUrl = await uploadPdf(manualPdfFile);
@@ -701,11 +705,7 @@ export default function SistemaApolices() {
 
       const adjustedCarteira = sanitizeCarteira(editForm.tipo_cliente, editForm.premio, editForm.carteira);
       if (!adjustedCarteira) {
-        throw new Error("Selecione a carteira.");
-      }
-
-      if (adjustedCarteira === "Alta Renda" && !isEligibleAltaRenda(editForm.tipo_cliente, editForm.premio)) {
-        throw new Error("Alta Renda só pode ser usada para PF com prêmio acima de 10 mil.");
+        throw new Error("Selecione uma carteira válida.");
       }
 
       let pdfUrl = editingPolicy.pdf_url || null;
@@ -768,11 +768,6 @@ export default function SistemaApolices() {
 
     if (!renewalForm.data_vencimento) {
       alert("Informe a nova data de vencimento.");
-      return;
-    }
-
-    if (renewalForm.carteira === "Alta Renda" && !isEligibleAltaRenda(renewalForm.tipo_cliente, renewalForm.premio)) {
-      alert("Alta Renda só pode ser usada para PF com prêmio acima de 10 mil.");
       return;
     }
 
@@ -907,10 +902,6 @@ export default function SistemaApolices() {
           throw new Error(`Linha ${index + 2}: carteira inválida.`);
         }
 
-        if (carteira === "Alta Renda" && !isEligibleAltaRenda(tipoCliente, premio)) {
-          throw new Error(`Linha ${index + 2}: Alta Renda só pode ser usada para PF com prêmio acima de 10 mil.`);
-        }
-
         return {
           cliente: row.cliente || null,
           empresa_segurad: row.empresa_segurad || row.cliente || null,
@@ -947,31 +938,36 @@ export default function SistemaApolices() {
       key: "vencidas" as DueFilter,
       title: "Vencidas",
       value: dashboard.dueCounts.vencidas,
-      accent: "#ffffff",
+      accent: "#ef4444",
+      bg: "#2a0d0d",
     },
     {
       key: "1" as DueFilter,
       title: "Em 1 dia",
       value: dashboard.dueCounts.umDia,
-      accent: "#d4d4d8",
+      accent: "#f97316",
+      bg: "#2b1307",
     },
     {
       key: "15" as DueFilter,
       title: "Até 15 dias",
       value: dashboard.dueCounts.quinze,
-      accent: "#a1a1aa",
+      accent: "#eab308",
+      bg: "#2a2207",
     },
     {
       key: "45" as DueFilter,
       title: "Até 45 dias",
       value: dashboard.dueCounts.quarentaCinco,
-      accent: "#8b949e",
+      accent: "#3b82f6",
+      bg: "#0b1d39",
     },
     {
       key: "60" as DueFilter,
       title: "Até 60 dias",
       value: dashboard.dueCounts.sessenta,
-      accent: "#71717a",
+      accent: "#8b5cf6",
+      bg: "#1e1336",
     },
   ];
 
@@ -980,8 +976,7 @@ export default function SistemaApolices() {
       <div style={styles.header}>
         <div>
           <div style={styles.logoTitleRow}>
-            <img src="/xp-logo.png" alt="XP Investimentos" style={styles.logo} />
-            <h1 style={styles.title}>Sistema de Apólices</h1>
+            <h1 style={styles.title}>Acompanhamento de Apólices</h1>
           </div>
           <p style={styles.subtitle}>
             Gestão completa de apólices, vencimentos, e-mails, importação e renovação.
@@ -1030,8 +1025,9 @@ export default function SistemaApolices() {
                 onClick={() => setFiltroVencimento(active ? "" : item.key)}
                 style={{
                   ...styles.kpiCardButton,
-                  borderColor: active ? item.accent : "#2b2b2b",
-                  boxShadow: active ? `0 0 0 1px ${item.accent}` : "none",
+                  borderColor: item.accent,
+                  background: item.bg,
+                  boxShadow: active ? `0 0 0 2px ${item.accent}` : "none",
                 }}
               >
                 <div style={{ ...styles.kpiTopLine, background: item.accent }} />
@@ -1067,13 +1063,13 @@ export default function SistemaApolices() {
             <div style={styles.kpiLabel}>Prêmio total PJ</div>
             <div style={styles.kpiValue}>{formatMoney(dashboard.premioTotalPJ)}</div>
           </div>
-          <div style={styles.card}>
+          <div style={{ ...styles.card, borderColor: "#166534" }}>
             <div style={styles.kpiLabel}>Renovadas</div>
-            <div style={styles.kpiValue}>{dashboard.apolicesRenovadas}</div>
+            <div style={{ ...styles.kpiValue, color: "#86efac" }}>{dashboard.apolicesRenovadas}</div>
           </div>
-          <div style={styles.card}>
+          <div style={{ ...styles.card, borderColor: "#7f1d1d" }}>
             <div style={styles.kpiLabel}>Perdidas</div>
-            <div style={styles.kpiValue}>{dashboard.apolicesPerdidas}</div>
+            <div style={{ ...styles.kpiValue, color: "#fca5a5" }}>{dashboard.apolicesPerdidas}</div>
           </div>
         </div>
       </section>
@@ -1501,7 +1497,13 @@ export default function SistemaApolices() {
                 step="0.01"
                 placeholder="Prêmio"
                 value={form.premio}
-                onChange={(e) => setForm({ ...form, premio: e.target.value })}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    premio: e.target.value,
+                    carteira: sanitizeCarteira(prev.tipo_cliente, e.target.value, prev.carteira),
+                  }))
+                }
                 required
               />
 
@@ -1743,7 +1745,7 @@ export default function SistemaApolices() {
               />
 
               <div style={styles.ruleHint}>
-                Ajuste PF/PJ e carteira por aqui. Alta Renda só fica disponível para PF com prêmio acima de 10 mil.
+                Ajuste PF/PJ e carteira por aqui. O sistema agora define uma carteira válida automaticamente quando necessário.
               </div>
 
               <div style={{ gridColumn: "1 / -1", display: "flex", gap: 12 }}>
@@ -1987,10 +1989,7 @@ export default function SistemaApolices() {
                       })
                     }
                   >
-                    <option
-                      value="Alta Renda"
-                      disabled={!isEligibleAltaRenda(renewalForm.tipo_cliente, renewalForm.premio)}
-                    >
+                    <option value="Alta Renda" disabled={!isEligibleAltaRenda(renewalForm.tipo_cliente, renewalForm.premio)}>
                       Alta Renda
                     </option>
                     <option value="Empresarial">Empresarial</option>
@@ -2115,11 +2114,6 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     gap: 12,
   },
-  logo: {
-    height: 34,
-    width: "auto",
-    objectFit: "contain",
-  },
   headerButtons: {
     display: "flex",
     gap: 10,
@@ -2169,9 +2163,8 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 14,
   },
   kpiCardButton: {
-    background: "#111111",
     borderRadius: 14,
-    border: "1px solid #2b2b2b",
+    border: "1px solid",
     padding: 16,
     textAlign: "left",
     color: "#f5f5f5",
@@ -2182,10 +2175,9 @@ const styles: Record<string, React.CSSProperties> = {
     height: 4,
     borderRadius: 999,
     marginBottom: 10,
-    background: "#ffffff",
   },
   kpiHint: {
-    color: "#a3a3a3",
+    color: "#c7c7c7",
     fontSize: 12,
     marginTop: 8,
   },
@@ -2253,7 +2245,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   kpiLabel: {
     fontSize: 13,
-    color: "#a3a3a3",
+    color: "#c7c7c7",
     marginBottom: 8,
   },
   kpiValue: {
@@ -2428,24 +2420,24 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
   },
   badgeSuccess: {
-    background: "#1a1a1a",
-    color: "#ffffff",
-    border: "1px solid #3f3f46",
+    background: "#052e16",
+    color: "#86efac",
+    border: "1px solid #166534",
   },
   badgeWarning: {
-    background: "#27272a",
-    color: "#fafafa",
-    border: "1px solid #52525b",
+    background: "#422006",
+    color: "#fcd34d",
+    border: "1px solid #b45309",
   },
   badgeInfo: {
-    background: "#18181b",
-    color: "#f4f4f5",
-    border: "1px solid #3f3f46",
+    background: "#172554",
+    color: "#93c5fd",
+    border: "1px solid #1d4ed8",
   },
   badgeDanger: {
-    background: "#2a0d0d",
-    color: "#fecaca",
-    border: "1px solid #7f1d1d",
+    background: "#450a0a",
+    color: "#fca5a5",
+    border: "1px solid #b91c1c",
   },
   badgeNeutralInline: {
     display: "inline-block",
@@ -2563,9 +2555,9 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: 16,
     padding: 12,
     borderRadius: 10,
-    background: "#1a1a1a",
-    color: "#ffffff",
+    background: "#052e16",
+    color: "#86efac",
     fontWeight: 600,
-    border: "1px solid #3f3f46",
+    border: "1px solid #166534",
   },
 };
