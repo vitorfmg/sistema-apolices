@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase } from "@/lib/supabase";
 
 type TipoCliente = "PF" | "PJ" | "";
 type Carteira = "Alta Renda" | "Empresarial" | "Renovacao" | "";
