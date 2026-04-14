@@ -87,7 +87,7 @@ const initialForm: ManualForm = {
   seguradora: "",
   data_vencimento: "",
   premio: "",
-  origem: "Excel",
+  origem: "Sistema",
   observacoes: "",
   tipo_cliente: "",
   carteira: "",
@@ -297,14 +297,14 @@ function polarToCartesian(cx: number, cy: number, radius: number, angleInDegrees
 }
 
 const PIE_COLORS = [
-  "#60a5fa",
-  "#34d399",
-  "#fbbf24",
-  "#f472b6",
-  "#a78bfa",
-  "#fb7185",
-  "#22d3ee",
-  "#f97316",
+  "#ffffff",
+  "#bfc6ce",
+  "#8b949e",
+  "#d4d4d8",
+  "#71717a",
+  "#a1a1aa",
+  "#e4e4e7",
+  "#52525b",
 ];
 
 export default function SistemaApolices() {
@@ -326,6 +326,10 @@ export default function SistemaApolices() {
   const [showImportArea, setShowImportArea] = useState(false);
   const [form, setForm] = useState<ManualForm>(initialForm);
   const [manualPdfFile, setManualPdfFile] = useState<File | null>(null);
+
+  const [editingPolicy, setEditingPolicy] = useState<Policy | null>(null);
+  const [editForm, setEditForm] = useState<ManualForm | null>(null);
+  const [editPdfFile, setEditPdfFile] = useState<File | null>(null);
 
   const [expiredPolicyModal, setExpiredPolicyModal] = useState<Policy | null>(null);
   const [renewalMode, setRenewalMode] = useState<"choice" | "renew" | "lost">("choice");
@@ -411,7 +415,7 @@ export default function SistemaApolices() {
         seguradora: pendingExpired.seguradora || "",
         data_vencimento: "",
         premio: String(pendingExpired.premio ?? ""),
-        origem: pendingExpired.origem || "Excel",
+        origem: pendingExpired.origem || "Sistema",
         observacoes: "",
         tipo_cliente: (pendingExpired.tipo_cliente || "PF") as "PF" | "PJ",
         carteira: sanitizeCarteira(
@@ -662,6 +666,86 @@ export default function SistemaApolices() {
     }
   }
 
+  function openEditPolicy(policy: Policy) {
+    setEditingPolicy(policy);
+    setEditPdfFile(null);
+    setEditForm({
+      cliente: policy.cliente || "",
+      empresa_segurad: policy.empresa_segurad || "",
+      tipo_seguro: policy.tipo_seguro || "",
+      seguradora: policy.seguradora || "",
+      data_vencimento: policy.data_vencimento || "",
+      premio: String(policy.premio ?? ""),
+      origem: policy.origem || "Sistema",
+      observacoes: policy.observacoes || "",
+      tipo_cliente: (policy.tipo_cliente || "") as TipoCliente,
+      carteira: sanitizeCarteira(
+        policy.tipo_cliente || "",
+        policy.premio ?? 0,
+        policy.carteira || ""
+      ) as Carteira,
+    });
+  }
+
+  async function handleSaveEditPolicy() {
+    if (!editingPolicy || !editForm) return;
+
+    setSaving(true);
+    setErrorMsg("");
+    setSuccessMsg("");
+
+    try {
+      if (!editForm.tipo_cliente) {
+        throw new Error("Selecione se o cliente é PF ou PJ.");
+      }
+
+      const adjustedCarteira = sanitizeCarteira(editForm.tipo_cliente, editForm.premio, editForm.carteira);
+      if (!adjustedCarteira) {
+        throw new Error("Selecione a carteira.");
+      }
+
+      if (adjustedCarteira === "Alta Renda" && !isEligibleAltaRenda(editForm.tipo_cliente, editForm.premio)) {
+        throw new Error("Alta Renda só pode ser usada para PF com prêmio acima de 10 mil.");
+      }
+
+      let pdfUrl = editingPolicy.pdf_url || null;
+      if (editPdfFile) {
+        pdfUrl = await uploadPdf(editPdfFile);
+      }
+
+      const { error } = await supabase
+        .from("policies")
+        .update({
+          cliente: editForm.cliente || null,
+          empresa_segurad: editForm.empresa_segurad || editForm.cliente || null,
+          tipo_seguro: editForm.tipo_seguro || null,
+          seguradora: editForm.seguradora || null,
+          data_vencimento: editForm.data_vencimento || null,
+          premio: toNumber(editForm.premio),
+          origem: editForm.origem || "Sistema",
+          observacoes: editForm.observacoes || null,
+          pdf_url: pdfUrl,
+          tipo_cliente: editForm.tipo_cliente || null,
+          carteira: adjustedCarteira || null,
+        })
+        .eq("id", editingPolicy.id)
+        .select();
+
+      if (error) throw error;
+
+      setEditingPolicy(null);
+      setEditForm(null);
+      setEditPdfFile(null);
+      setSuccessMsg("Apólice atualizada com sucesso.");
+      await refreshAll();
+    } catch (err: any) {
+      console.error(err);
+      setErrorMsg(err?.message || "Erro ao atualizar apólice.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleUpdateStatus(id: string, status: StatusApolice) {
     const { error } = await supabase
       .from("policies")
@@ -863,31 +947,31 @@ export default function SistemaApolices() {
       key: "vencidas" as DueFilter,
       title: "Vencidas",
       value: dashboard.dueCounts.vencidas,
-      accent: "#ef4444",
+      accent: "#ffffff",
     },
     {
       key: "1" as DueFilter,
       title: "Em 1 dia",
       value: dashboard.dueCounts.umDia,
-      accent: "#f59e0b",
+      accent: "#d4d4d8",
     },
     {
       key: "15" as DueFilter,
       title: "Até 15 dias",
       value: dashboard.dueCounts.quinze,
-      accent: "#eab308",
+      accent: "#a1a1aa",
     },
     {
       key: "45" as DueFilter,
       title: "Até 45 dias",
       value: dashboard.dueCounts.quarentaCinco,
-      accent: "#3b82f6",
+      accent: "#8b949e",
     },
     {
       key: "60" as DueFilter,
       title: "Até 60 dias",
       value: dashboard.dueCounts.sessenta,
-      accent: "#8b5cf6",
+      accent: "#71717a",
     },
   ];
 
@@ -895,7 +979,10 @@ export default function SistemaApolices() {
     <div style={styles.page}>
       <div style={styles.header}>
         <div>
-          <h1 style={styles.title}>Sistema de Apólices</h1>
+          <div style={styles.logoTitleRow}>
+            <img src="/xp-logo.png" alt="XP Investimentos" style={styles.logo} />
+            <h1 style={styles.title}>Sistema de Apólices</h1>
+          </div>
           <p style={styles.subtitle}>
             Gestão completa de apólices, vencimentos, e-mails, importação e renovação.
           </p>
@@ -920,10 +1007,10 @@ export default function SistemaApolices() {
 
           <button
             style={styles.primaryButton}
-            onClick={() => setShowCreateForm((v) => !v)}
+            onClick={() => setShowCreateForm(true)}
             type="button"
           >
-            {showCreateForm ? "Fechar cadastro" : "Nova apólice"}
+            Nova apólice
           </button>
         </div>
       </div>
@@ -943,11 +1030,11 @@ export default function SistemaApolices() {
                 onClick={() => setFiltroVencimento(active ? "" : item.key)}
                 style={{
                   ...styles.kpiCardButton,
-                  borderColor: active ? item.accent : "#253047",
+                  borderColor: active ? item.accent : "#2b2b2b",
                   boxShadow: active ? `0 0 0 1px ${item.accent}` : "none",
                 }}
               >
-                <div style={{ ...styles.kpiTopLine, color: item.accent }} />
+                <div style={{ ...styles.kpiTopLine, background: item.accent }} />
                 <div style={styles.kpiLabel}>{item.title}</div>
                 <div style={styles.kpiValue}>{item.value}</div>
                 <div style={styles.kpiHint}>{active ? "Filtro ativo" : "Clique para abrir"}</div>
@@ -1012,18 +1099,18 @@ export default function SistemaApolices() {
                       key={slice.cliente}
                       d={slice.path}
                       fill={slice.color}
-                      stroke="#0b1220"
+                      stroke="#000000"
                       strokeWidth={2}
                       style={{ cursor: "pointer" }}
                       onClick={() => setSelectedClientName(slice.cliente)}
                     />
                   ))}
-                  <circle cx="110" cy="110" r="42" fill="#0b1220" />
+                  <circle cx="110" cy="110" r="42" fill="#000000" />
                   <text
                     x="110"
                     y="105"
                     textAnchor="middle"
-                    fill="#e5edf7"
+                    fill="#ffffff"
                     fontSize="12"
                     fontWeight="700"
                   >
@@ -1033,7 +1120,7 @@ export default function SistemaApolices() {
                     x="110"
                     y="122"
                     textAnchor="middle"
-                    fill="#94a3b8"
+                    fill="#9ca3af"
                     fontSize="11"
                   >
                     clique na fatia
@@ -1106,141 +1193,6 @@ export default function SistemaApolices() {
               </span>
             </div>
           </div>
-        </section>
-      )}
-
-      {showCreateForm && (
-        <section style={styles.section}>
-          <h2 style={styles.sectionTitle}>Cadastro manual</h2>
-
-          <form onSubmit={handleCreatePolicy} style={styles.formGrid}>
-            <input
-              style={styles.input}
-              placeholder="Cliente"
-              value={form.cliente}
-              onChange={(e) => setForm({ ...form, cliente: e.target.value })}
-              required
-            />
-
-            <input
-              style={styles.input}
-              placeholder="Empresa segurada"
-              value={form.empresa_segurad}
-              onChange={(e) => setForm({ ...form, empresa_segurad: e.target.value })}
-            />
-
-            <input
-              style={styles.input}
-              placeholder="Tipo de seguro"
-              value={form.tipo_seguro}
-              onChange={(e) => setForm({ ...form, tipo_seguro: e.target.value })}
-              required
-            />
-
-            <input
-              style={styles.input}
-              placeholder="Seguradora"
-              value={form.seguradora}
-              onChange={(e) => setForm({ ...form, seguradora: e.target.value })}
-              required
-            />
-
-            <input
-              style={styles.input}
-              type="date"
-              value={form.data_vencimento}
-              onChange={(e) => setForm({ ...form, data_vencimento: e.target.value })}
-              required
-            />
-
-            <input
-              style={styles.input}
-              type="number"
-              step="0.01"
-              placeholder="Prêmio"
-              value={form.premio}
-              onChange={(e) => setForm({ ...form, premio: e.target.value })}
-              required
-            />
-
-            <select
-              style={styles.input}
-              value={form.tipo_cliente}
-              onChange={(e) => {
-                const nextTipo = e.target.value as TipoCliente;
-                setForm((prev) => ({
-                  ...prev,
-                  tipo_cliente: nextTipo,
-                  carteira: sanitizeCarteira(nextTipo, prev.premio, prev.carteira),
-                }));
-              }}
-              required
-            >
-              <option value="">Tipo de cliente</option>
-              <option value="PF">PF</option>
-              <option value="PJ">PJ</option>
-            </select>
-
-            <select
-              style={styles.input}
-              value={form.carteira}
-              onChange={(e) => {
-                const nextCarteira = e.target.value as Carteira;
-                setForm((prev) => ({
-                  ...prev,
-                  carteira: sanitizeCarteira(prev.tipo_cliente, prev.premio, nextCarteira),
-                }));
-              }}
-              required
-            >
-              <option value="">Carteira</option>
-              <option
-                value="Alta Renda"
-                disabled={!isEligibleAltaRenda(form.tipo_cliente, form.premio)}
-              >
-                Alta Renda
-              </option>
-              <option value="Empresarial">Empresarial</option>
-              <option value="Renovacao">Renovacao</option>
-            </select>
-
-            <input
-              style={styles.input}
-              placeholder="Origem"
-              value={form.origem}
-              onChange={(e) => setForm({ ...form, origem: e.target.value })}
-            />
-
-            <label style={styles.uploadLabel}>
-              <span>Anexar PDF</span>
-              <input
-                type="file"
-                accept="application/pdf"
-                onChange={(e) => setManualPdfFile(e.target.files?.[0] || null)}
-                style={styles.hiddenInput}
-              />
-              <span style={styles.uploadValue}>
-                {manualPdfFile ? manualPdfFile.name : "Selecionar arquivo"}
-              </span>
-            </label>
-
-            <textarea
-              style={{ ...styles.input, minHeight: 90, gridColumn: "1 / -1" }}
-              placeholder="Observações"
-              value={form.observacoes}
-              onChange={(e) => setForm({ ...form, observacoes: e.target.value })}
-            />
-
-            <div style={styles.ruleHint}>
-              Alta Renda fica disponível apenas para PF com prêmio acima de 10 mil.
-            </div>
-
-            <div style={{ gridColumn: "1 / -1", display: "flex", gap: 12 }}>
-              <button type="submit" style={styles.primaryButton} disabled={saving}>
-                {saving ? "Salvando..." : "Salvar apólice"}
-              </button>
-            </div>
-          </form>
         </section>
       )}
 
@@ -1352,7 +1304,11 @@ export default function SistemaApolices() {
                 {filteredPolicies.map((ap) => {
                   const emailLog = ap._latestEmail;
                   return (
-                    <tr key={ap.id}>
+                    <tr
+                      key={ap.id}
+                      style={styles.rowClickable}
+                      onClick={() => openEditPolicy(ap)}
+                    >
                       <td style={styles.td}>
                         <div style={styles.cellTitle}>{ap.cliente || "-"}</div>
                         <div style={styles.cellSubtitle}>{ap.empresa_segurad || "-"}</div>
@@ -1427,7 +1383,13 @@ export default function SistemaApolices() {
 
                       <td style={styles.td}>
                         {ap.pdf_url ? (
-                          <a href={ap.pdf_url} target="_blank" rel="noreferrer" style={styles.link}>
+                          <a
+                            href={ap.pdf_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={styles.link}
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             Abrir PDF
                           </a>
                         ) : (
@@ -1436,7 +1398,7 @@ export default function SistemaApolices() {
                       </td>
 
                       <td style={styles.td}>
-                        <div style={styles.actionButtons}>
+                        <div style={styles.actionButtons} onClick={(e) => e.stopPropagation()}>
                           <button
                             type="button"
                             style={styles.actionBtn}
@@ -1475,6 +1437,340 @@ export default function SistemaApolices() {
           </div>
         )}
       </section>
+
+      {showCreateForm && (
+        <div style={styles.modalOverlay}>
+          <div style={styles.modal}>
+            <div style={styles.modalHeader}>
+              <h2 style={styles.modalTitle}>Nova apólice</h2>
+              <button
+                type="button"
+                style={styles.modalClose}
+                onClick={() => {
+                  setShowCreateForm(false);
+                  setManualPdfFile(null);
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleCreatePolicy} style={styles.formGrid}>
+              <input
+                style={styles.input}
+                placeholder="Cliente"
+                value={form.cliente}
+                onChange={(e) => setForm({ ...form, cliente: e.target.value })}
+                required
+              />
+
+              <input
+                style={styles.input}
+                placeholder="Empresa segurada"
+                value={form.empresa_segurad}
+                onChange={(e) => setForm({ ...form, empresa_segurad: e.target.value })}
+              />
+
+              <input
+                style={styles.input}
+                placeholder="Tipo de seguro"
+                value={form.tipo_seguro}
+                onChange={(e) => setForm({ ...form, tipo_seguro: e.target.value })}
+                required
+              />
+
+              <input
+                style={styles.input}
+                placeholder="Seguradora"
+                value={form.seguradora}
+                onChange={(e) => setForm({ ...form, seguradora: e.target.value })}
+                required
+              />
+
+              <input
+                style={styles.input}
+                type="date"
+                value={form.data_vencimento}
+                onChange={(e) => setForm({ ...form, data_vencimento: e.target.value })}
+                required
+              />
+
+              <input
+                style={styles.input}
+                type="number"
+                step="0.01"
+                placeholder="Prêmio"
+                value={form.premio}
+                onChange={(e) => setForm({ ...form, premio: e.target.value })}
+                required
+              />
+
+              <select
+                style={styles.input}
+                value={form.tipo_cliente}
+                onChange={(e) => {
+                  const nextTipo = e.target.value as TipoCliente;
+                  setForm((prev) => ({
+                    ...prev,
+                    tipo_cliente: nextTipo,
+                    carteira: sanitizeCarteira(nextTipo, prev.premio, prev.carteira),
+                  }));
+                }}
+                required
+              >
+                <option value="">Tipo de cliente</option>
+                <option value="PF">PF</option>
+                <option value="PJ">PJ</option>
+              </select>
+
+              <select
+                style={styles.input}
+                value={form.carteira}
+                onChange={(e) => {
+                  const nextCarteira = e.target.value as Carteira;
+                  setForm((prev) => ({
+                    ...prev,
+                    carteira: sanitizeCarteira(prev.tipo_cliente, prev.premio, nextCarteira),
+                  }));
+                }}
+                required
+              >
+                <option value="">Carteira</option>
+                <option
+                  value="Alta Renda"
+                  disabled={!isEligibleAltaRenda(form.tipo_cliente, form.premio)}
+                >
+                  Alta Renda
+                </option>
+                <option value="Empresarial">Empresarial</option>
+                <option value="Renovacao">Renovacao</option>
+              </select>
+
+              <input
+                style={styles.input}
+                placeholder="Origem"
+                value={form.origem}
+                onChange={(e) => setForm({ ...form, origem: e.target.value })}
+              />
+
+              <label style={styles.uploadLabel}>
+                <span>Anexar PDF</span>
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={(e) => setManualPdfFile(e.target.files?.[0] || null)}
+                  style={styles.hiddenInput}
+                />
+                <span style={styles.uploadValue}>
+                  {manualPdfFile ? manualPdfFile.name : "Selecionar arquivo"}
+                </span>
+              </label>
+
+              <textarea
+                style={{ ...styles.input, minHeight: 90, gridColumn: "1 / -1" }}
+                placeholder="Observações"
+                value={form.observacoes}
+                onChange={(e) => setForm({ ...form, observacoes: e.target.value })}
+              />
+
+              <div style={styles.ruleHint}>
+                Alta Renda fica disponível apenas para PF com prêmio acima de 10 mil.
+              </div>
+
+              <div style={{ gridColumn: "1 / -1", display: "flex", gap: 12 }}>
+                <button type="submit" style={styles.primaryButton} disabled={saving}>
+                  {saving ? "Salvando..." : "Salvar apólice"}
+                </button>
+                <button
+                  type="button"
+                  style={styles.secondaryButton}
+                  onClick={() => {
+                    setShowCreateForm(false);
+                    setManualPdfFile(null);
+                  }}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {editingPolicy && editForm && (
+        <div style={styles.modalOverlay}>
+          <div style={styles.modal}>
+            <div style={styles.modalHeader}>
+              <h2 style={styles.modalTitle}>Editar apólice</h2>
+              <button
+                type="button"
+                style={styles.modalClose}
+                onClick={() => {
+                  setEditingPolicy(null);
+                  setEditForm(null);
+                  setEditPdfFile(null);
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={styles.formGrid}>
+              <input
+                style={styles.input}
+                placeholder="Cliente"
+                value={editForm.cliente}
+                onChange={(e) => setEditForm({ ...editForm, cliente: e.target.value })}
+              />
+
+              <input
+                style={styles.input}
+                placeholder="Empresa segurada"
+                value={editForm.empresa_segurad}
+                onChange={(e) => setEditForm({ ...editForm, empresa_segurad: e.target.value })}
+              />
+
+              <input
+                style={styles.input}
+                placeholder="Tipo de seguro"
+                value={editForm.tipo_seguro}
+                onChange={(e) => setEditForm({ ...editForm, tipo_seguro: e.target.value })}
+              />
+
+              <input
+                style={styles.input}
+                placeholder="Seguradora"
+                value={editForm.seguradora}
+                onChange={(e) => setEditForm({ ...editForm, seguradora: e.target.value })}
+              />
+
+              <input
+                style={styles.input}
+                type="date"
+                value={editForm.data_vencimento}
+                onChange={(e) => setEditForm({ ...editForm, data_vencimento: e.target.value })}
+              />
+
+              <input
+                style={styles.input}
+                type="number"
+                step="0.01"
+                placeholder="Prêmio"
+                value={editForm.premio}
+                onChange={(e) =>
+                  setEditForm({
+                    ...editForm,
+                    premio: e.target.value,
+                    carteira: sanitizeCarteira(
+                      editForm.tipo_cliente,
+                      e.target.value,
+                      editForm.carteira
+                    ),
+                  })
+                }
+              />
+
+              <select
+                style={styles.input}
+                value={editForm.tipo_cliente}
+                onChange={(e) =>
+                  setEditForm({
+                    ...editForm,
+                    tipo_cliente: e.target.value as TipoCliente,
+                    carteira: sanitizeCarteira(
+                      e.target.value,
+                      editForm.premio,
+                      editForm.carteira
+                    ),
+                  })
+                }
+              >
+                <option value="">Tipo de cliente</option>
+                <option value="PF">PF</option>
+                <option value="PJ">PJ</option>
+              </select>
+
+              <select
+                style={styles.input}
+                value={editForm.carteira}
+                onChange={(e) =>
+                  setEditForm({
+                    ...editForm,
+                    carteira: sanitizeCarteira(
+                      editForm.tipo_cliente,
+                      editForm.premio,
+                      e.target.value
+                    ),
+                  })
+                }
+              >
+                <option value="">Carteira</option>
+                <option
+                  value="Alta Renda"
+                  disabled={!isEligibleAltaRenda(editForm.tipo_cliente, editForm.premio)}
+                >
+                  Alta Renda
+                </option>
+                <option value="Empresarial">Empresarial</option>
+                <option value="Renovacao">Renovacao</option>
+              </select>
+
+              <input
+                style={styles.input}
+                placeholder="Origem"
+                value={editForm.origem}
+                onChange={(e) => setEditForm({ ...editForm, origem: e.target.value })}
+              />
+
+              <label style={styles.uploadLabel}>
+                <span>Trocar PDF</span>
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={(e) => setEditPdfFile(e.target.files?.[0] || null)}
+                  style={styles.hiddenInput}
+                />
+                <span style={styles.uploadValue}>
+                  {editPdfFile ? editPdfFile.name : "Selecionar arquivo"}
+                </span>
+              </label>
+
+              <textarea
+                style={{ ...styles.input, minHeight: 90, gridColumn: "1 / -1" }}
+                placeholder="Observações"
+                value={editForm.observacoes}
+                onChange={(e) => setEditForm({ ...editForm, observacoes: e.target.value })}
+              />
+
+              <div style={styles.ruleHint}>
+                Ajuste PF/PJ e carteira por aqui. Alta Renda só fica disponível para PF com prêmio acima de 10 mil.
+              </div>
+
+              <div style={{ gridColumn: "1 / -1", display: "flex", gap: 12 }}>
+                <button
+                  type="button"
+                  style={styles.primaryButton}
+                  onClick={handleSaveEditPolicy}
+                  disabled={saving}
+                >
+                  {saving ? "Salvando..." : "Salvar alterações"}
+                </button>
+                <button
+                  type="button"
+                  style={styles.secondaryButton}
+                  onClick={() => {
+                    setEditingPolicy(null);
+                    setEditForm(null);
+                    setEditPdfFile(null);
+                  }}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {selectedClientName && (
         <div style={styles.modalOverlay}>
@@ -1801,9 +2097,9 @@ export default function SistemaApolices() {
 const styles: Record<string, React.CSSProperties> = {
   page: {
     padding: 24,
-    background: "#020817",
+    background: "#000000",
     minHeight: "100vh",
-    color: "#e5edf7",
+    color: "#f5f5f5",
     fontFamily: "Arial, sans-serif",
   },
   header: {
@@ -1814,6 +2110,16 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: 24,
     flexWrap: "wrap",
   },
+  logoTitleRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+  },
+  logo: {
+    height: 34,
+    width: "auto",
+    objectFit: "contain",
+  },
   headerButtons: {
     display: "flex",
     gap: 10,
@@ -1823,25 +2129,25 @@ const styles: Record<string, React.CSSProperties> = {
     margin: 0,
     fontSize: 28,
     fontWeight: 700,
-    color: "#f8fafc",
+    color: "#ffffff",
   },
   subtitle: {
-    margin: "8px 0 0",
-    color: "#94a3b8",
+    margin: "10px 0 0",
+    color: "#a3a3a3",
   },
   section: {
-    background: "#0b1220",
+    background: "#0c0c0c",
     borderRadius: 18,
     padding: 20,
-    border: "1px solid #1e293b",
+    border: "1px solid #262626",
     marginBottom: 20,
-    boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
+    boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
   },
   sectionTitle: {
     margin: "0 0 16px 0",
     fontSize: 20,
     fontWeight: 700,
-    color: "#f8fafc",
+    color: "#ffffff",
   },
   sectionHeaderRow: {
     display: "flex",
@@ -1855,7 +2161,7 @@ const styles: Record<string, React.CSSProperties> = {
     margin: "0 0 12px 0",
     fontSize: 16,
     fontWeight: 700,
-    color: "#f8fafc",
+    color: "#ffffff",
   },
   kpiGrid: {
     display: "grid",
@@ -1863,12 +2169,12 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 14,
   },
   kpiCardButton: {
-    background: "#0f172a",
+    background: "#111111",
     borderRadius: 14,
-    border: "1px solid #253047",
+    border: "1px solid #2b2b2b",
     padding: 16,
     textAlign: "left",
-    color: "#e5edf7",
+    color: "#f5f5f5",
     cursor: "pointer",
   },
   kpiTopLine: {
@@ -1876,22 +2182,22 @@ const styles: Record<string, React.CSSProperties> = {
     height: 4,
     borderRadius: 999,
     marginBottom: 10,
-    background: "#60a5fa",
+    background: "#ffffff",
   },
   kpiHint: {
-    color: "#94a3b8",
+    color: "#a3a3a3",
     fontSize: 12,
     marginTop: 8,
   },
   card: {
-    background: "#0f172a",
-    border: "1px solid #1f2a3d",
+    background: "#111111",
+    border: "1px solid #262626",
     borderRadius: 14,
     padding: 16,
   },
   chartCard: {
-    background: "#0f172a",
-    border: "1px solid #1f2a3d",
+    background: "#111111",
+    border: "1px solid #262626",
     borderRadius: 14,
     padding: 16,
     minWidth: 0,
@@ -1917,8 +2223,8 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     gap: 10,
     background: "transparent",
-    border: "1px solid #263246",
-    color: "#dbe4ef",
+    border: "1px solid #2d2d2d",
+    color: "#e5e5e5",
     borderRadius: 10,
     padding: "10px 12px",
     cursor: "pointer",
@@ -1941,19 +2247,19 @@ const styles: Record<string, React.CSSProperties> = {
   listRow: {
     display: "flex",
     justifyContent: "space-between",
-    borderBottom: "1px solid #182235",
+    borderBottom: "1px solid #1f1f1f",
     paddingBottom: 8,
-    color: "#dbe4ef",
+    color: "#e5e5e5",
   },
   kpiLabel: {
     fontSize: 13,
-    color: "#94a3b8",
+    color: "#a3a3a3",
     marginBottom: 8,
   },
   kpiValue: {
     fontSize: 24,
     fontWeight: 700,
-    color: "#f8fafc",
+    color: "#ffffff",
   },
   filtersGrid: {
     display: "grid",
@@ -1969,12 +2275,12 @@ const styles: Record<string, React.CSSProperties> = {
     width: "100%",
     padding: "12px 14px",
     borderRadius: 10,
-    border: "1px solid #334155",
+    border: "1px solid #3a3a3a",
     fontSize: 14,
     outline: "none",
     boxSizing: "border-box",
-    background: "#111827",
-    color: "#e5edf7",
+    background: "#161616",
+    color: "#f5f5f5",
   },
   uploadLabel: {
     display: "flex",
@@ -1982,13 +2288,13 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 8,
     padding: "12px 14px",
     borderRadius: 10,
-    border: "1px solid #334155",
-    background: "#111827",
-    color: "#e5edf7",
+    border: "1px solid #3a3a3a",
+    background: "#161616",
+    color: "#f5f5f5",
     cursor: "pointer",
   },
   uploadValue: {
-    color: "#93c5fd",
+    color: "#d4d4d8",
     fontSize: 13,
   },
   hiddenInput: {
@@ -1998,17 +2304,17 @@ const styles: Record<string, React.CSSProperties> = {
     border: "none",
     borderRadius: 10,
     padding: "12px 16px",
-    background: "#2563eb",
-    color: "#fff",
+    background: "#ffffff",
+    color: "#000000",
     cursor: "pointer",
     fontWeight: 700,
   },
   secondaryButton: {
-    border: "1px solid #334155",
+    border: "1px solid #3a3a3a",
     borderRadius: 10,
     padding: "12px 16px",
-    background: "#0f172a",
-    color: "#e5edf7",
+    background: "#111111",
+    color: "#f5f5f5",
     cursor: "pointer",
     fontWeight: 600,
   },
@@ -2016,13 +2322,13 @@ const styles: Record<string, React.CSSProperties> = {
     border: "none",
     borderRadius: 10,
     padding: "12px 16px",
-    background: "#dc2626",
-    color: "#fff",
+    background: "#7f1d1d",
+    color: "#ffffff",
     cursor: "pointer",
     fontWeight: 700,
   },
   helperText: {
-    color: "#94a3b8",
+    color: "#a3a3a3",
     marginTop: -4,
     marginBottom: 14,
   },
@@ -2036,10 +2342,10 @@ const styles: Record<string, React.CSSProperties> = {
       width: "100%",
       padding: "12px 14px",
       borderRadius: 10,
-      border: "1px solid #334155",
+      border: "1px solid #3a3a3a",
       fontSize: 14,
-      background: "#111827",
-      color: "#e5edf7",
+      background: "#161616",
+      color: "#f5f5f5",
       boxSizing: "border-box",
     } as React.CSSProperties),
   },
@@ -2051,7 +2357,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   ruleHint: {
     gridColumn: "1 / -1",
-    color: "#93c5fd",
+    color: "#d4d4d8",
     fontSize: 13,
   },
   actionButtons: {
@@ -2060,19 +2366,19 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 8,
   },
   actionBtn: {
-    border: "1px solid #334155",
+    border: "1px solid #3a3a3a",
     borderRadius: 8,
     padding: "6px 10px",
-    background: "#0f172a",
+    background: "#141414",
     cursor: "pointer",
     fontSize: 12,
-    color: "#e5edf7",
+    color: "#f5f5f5",
   },
   actionBtnDanger: {
     border: "1px solid #7f1d1d",
     borderRadius: 8,
     padding: "6px 10px",
-    background: "#3b0d0d",
+    background: "#2a0d0d",
     cursor: "pointer",
     fontSize: 12,
     color: "#fecaca",
@@ -2088,26 +2394,29 @@ const styles: Record<string, React.CSSProperties> = {
   th: {
     textAlign: "left",
     padding: "12px 10px",
-    borderBottom: "1px solid #223047",
-    background: "#0f172a",
+    borderBottom: "1px solid #2b2b2b",
+    background: "#111111",
     fontSize: 13,
-    color: "#cbd5e1",
+    color: "#d4d4d8",
     position: "sticky",
     top: 0,
   },
   td: {
     padding: "12px 10px",
-    borderBottom: "1px solid #182235",
+    borderBottom: "1px solid #1f1f1f",
     fontSize: 14,
     verticalAlign: "top",
-    color: "#e5edf7",
+    color: "#f5f5f5",
+  },
+  rowClickable: {
+    cursor: "pointer",
   },
   cellTitle: {
     fontWeight: 700,
     marginBottom: 4,
   },
   cellSubtitle: {
-    color: "#94a3b8",
+    color: "#a3a3a3",
     fontSize: 12,
     marginTop: 4,
   },
@@ -2119,20 +2428,24 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
   },
   badgeSuccess: {
-    background: "#052e16",
-    color: "#86efac",
+    background: "#1a1a1a",
+    color: "#ffffff",
+    border: "1px solid #3f3f46",
   },
   badgeWarning: {
-    background: "#422006",
-    color: "#fcd34d",
+    background: "#27272a",
+    color: "#fafafa",
+    border: "1px solid #52525b",
   },
   badgeInfo: {
-    background: "#172554",
-    color: "#93c5fd",
+    background: "#18181b",
+    color: "#f4f4f5",
+    border: "1px solid #3f3f46",
   },
   badgeDanger: {
-    background: "#450a0a",
-    color: "#fca5a5",
+    background: "#2a0d0d",
+    color: "#fecaca",
+    border: "1px solid #7f1d1d",
   },
   badgeNeutralInline: {
     display: "inline-block",
@@ -2140,18 +2453,18 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "6px 10px",
     fontSize: 12,
     fontWeight: 700,
-    background: "#1f2937",
-    color: "#cbd5e1",
+    background: "#1f1f1f",
+    color: "#d4d4d8",
   },
   link: {
-    color: "#93c5fd",
-    textDecoration: "none",
+    color: "#ffffff",
+    textDecoration: "underline",
     fontWeight: 600,
   },
   modalOverlay: {
     position: "fixed",
     inset: 0,
-    background: "rgba(2, 6, 23, 0.82)",
+    background: "rgba(0, 0, 0, 0.82)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -2160,12 +2473,12 @@ const styles: Record<string, React.CSSProperties> = {
   },
   modal: {
     width: "100%",
-    maxWidth: 900,
-    background: "#0b1220",
+    maxWidth: 950,
+    background: "#0c0c0c",
     borderRadius: 16,
     padding: 24,
-    border: "1px solid #223047",
-    boxShadow: "0 10px 40px rgba(0,0,0,0.4)",
+    border: "1px solid #2b2b2b",
+    boxShadow: "0 10px 40px rgba(0,0,0,0.45)",
     maxHeight: "90vh",
     overflowY: "auto",
   },
@@ -2180,12 +2493,12 @@ const styles: Record<string, React.CSSProperties> = {
     margin: 0,
     fontSize: 22,
     fontWeight: 700,
-    color: "#f8fafc",
+    color: "#ffffff",
   },
   modalClose: {
     background: "transparent",
-    color: "#cbd5e1",
-    border: "1px solid #334155",
+    color: "#d4d4d8",
+    border: "1px solid #3a3a3a",
     width: 36,
     height: 36,
     borderRadius: 10,
@@ -2194,7 +2507,7 @@ const styles: Record<string, React.CSSProperties> = {
   modalText: {
     margin: "0 0 12px 0",
     lineHeight: 1.5,
-    color: "#dbe4ef",
+    color: "#e5e5e5",
   },
   modalActions: {
     display: "flex",
@@ -2203,7 +2516,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 16,
   },
   muted: {
-    color: "#94a3b8",
+    color: "#a3a3a3",
   },
   modalList: {
     display: "flex",
@@ -2212,8 +2525,8 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 16,
   },
   clientDetailCard: {
-    border: "1px solid #223047",
-    background: "#0f172a",
+    border: "1px solid #2b2b2b",
+    background: "#111111",
     borderRadius: 12,
     padding: 14,
   },
@@ -2222,13 +2535,13 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "space-between",
     gap: 12,
     marginBottom: 8,
-    color: "#f8fafc",
+    color: "#ffffff",
   },
   clientDetailMeta: {
     display: "flex",
     gap: 12,
     flexWrap: "wrap",
-    color: "#94a3b8",
+    color: "#a3a3a3",
     fontSize: 13,
   },
   clientSummaryGrid: {
@@ -2241,8 +2554,8 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: 16,
     padding: 12,
     borderRadius: 10,
-    background: "#450a0a",
-    color: "#fca5a5",
+    background: "#2a0d0d",
+    color: "#fecaca",
     fontWeight: 600,
     border: "1px solid #7f1d1d",
   },
@@ -2250,9 +2563,9 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: 16,
     padding: 12,
     borderRadius: 10,
-    background: "#052e16",
-    color: "#86efac",
+    background: "#1a1a1a",
+    color: "#ffffff",
     fontWeight: 600,
-    border: "1px solid #166534",
+    border: "1px solid #3f3f46",
   },
 };
